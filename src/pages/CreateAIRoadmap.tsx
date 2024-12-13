@@ -33,6 +33,7 @@ export function CreateAIRoadmap() {
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors },
   } = useForm<CreateRoadmapSchema>({
     resolver: zodResolver(createRoadmapSchema),
@@ -40,6 +41,15 @@ export function CreateAIRoadmap() {
       learning_style: []
     }
   })
+
+  const toggleLearningStyle = (style: string) => {
+    const newStyles = selectedStyles.includes(style)
+      ? selectedStyles.filter(s => s !== style)
+      : [...selectedStyles, style]
+    
+    setSelectedStyles(newStyles)
+    setValue('learning_style', newStyles, { shouldValidate: true })
+  }
 
   const onSubmit = async (data: CreateRoadmapSchema) => {
     if (!user) {
@@ -64,14 +74,14 @@ export function CreateAIRoadmap() {
       }
 
       // Generate roadmap content
-      const generatedContent = await generateRoadmap({
+      const content = await generateRoadmap({
         title: data.title,
         skill_level: data.skill_level,
         time_commitment_hours: data.time_commitment_hours,
         learning_style: selectedStyles
       })
 
-      // Start a Supabase transaction
+      // Save roadmap with content
       const { data: roadmap, error: roadmapError } = await supabase
         .from('roadmaps')
         .insert({
@@ -81,62 +91,13 @@ export function CreateAIRoadmap() {
           skill_level: data.skill_level,
           time_commitment_hours: data.time_commitment_hours,
           learning_style: selectedStyles,
-          privacy: 'private'
+          privacy: 'private',
+          content: content // Save the entire content object
         })
         .select()
         .single()
 
       if (roadmapError) throw roadmapError
-
-      // Insert sections
-      for (let i = 0; i < generatedContent.length; i++) {
-        const section = generatedContent[i]
-        const { data: sectionData, error: sectionError } = await supabase
-          .from('sections')
-          .insert({
-            roadmap_id: roadmap.id,
-            title: section.title,
-            description: section.description,
-            order_index: i
-          })
-          .select()
-          .single()
-
-        if (sectionError) throw sectionError
-
-        // Insert topics for this section
-        for (let j = 0; j < section.topics.length; j++) {
-          const topic = section.topics[j]
-          const { data: topicData, error: topicError } = await supabase
-            .from('topics')
-            .insert({
-              section_id: sectionData.id,
-              title: topic.title,
-              description: topic.description,
-              order_index: j
-            })
-            .select()
-            .single()
-
-          if (topicError) throw topicError
-
-          // Insert resources for this topic
-          const resources = topic.resources.map((resource, k) => ({
-            topic_id: topicData.id,
-            title: resource.title,
-            url: resource.url,
-            type: resource.type,
-            description: resource.description,
-            order_index: k
-          }))
-
-          const { error: resourcesError } = await supabase
-            .from('resources')
-            .insert(resources)
-
-          if (resourcesError) throw resourcesError
-        }
-      }
 
       // Update remaining roadmaps count
       const { error: updateError } = await supabase
@@ -156,14 +117,6 @@ export function CreateAIRoadmap() {
     } finally {
       setIsCreating(false)
     }
-  }
-
-  const toggleLearningStyle = (style: string) => {
-    setSelectedStyles(prev => 
-      prev.includes(style)
-        ? prev.filter(s => s !== style)
-        : [...prev, style]
-    )
   }
 
   return (
